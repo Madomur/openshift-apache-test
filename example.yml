@@ -1,0 +1,147 @@
+---
+kind: Template
+apiVersion: v1
+labels:
+  template: apache-example
+  app: apache-example
+metadata:
+  name: apache-example
+  annotations:
+    openshift.io/provider-display-name: Martin Delbrück
+objects:
+  - kind: BuildConfig
+    apiVersion: v1
+    metadata:
+      name: ${PROXY_NAME}
+      labels:
+        name: ${PROXY_NAME}
+    spec:
+      source:
+        type: Git
+        git:
+          uri: "${SOURCE_REPOSITORY_URL}"
+          ref: "${SOURCE_REPOSITORY_REF}"
+        contextDir: "${CONTEXT_DIR}"
+      strategy:
+        dockerStrategy:
+          dockerfilePath: dockerfiles/httpd/Dockerfile
+      output:
+        to:
+          kind: ImageStreamTag
+          name: "${PROXY_NAME}:latest"
+      triggger:
+        - type: ConfigChange
+        - type: GitHub
+          github:
+            secret: "${GITHUB_WEBHOOK_SECRET}"
+  - kind: ImageStream
+    apiVersion: v1
+    metadata:
+      name: "${PROXY_NAME}"
+
+  - kind: DeploymentConfig
+    apiVersion: v1
+    metadata:
+      name: ${PROXY_NAME}
+      annotations:
+        description: Defines how to deploy the proxy
+        template.alpha.openshift.io/wait-for-ready: 'true'
+    spec:
+      replicas: 1
+      strategy:
+        type: Rolling
+      selector:
+        name: "${PROXY_NAME}"
+      template:
+        metadata:
+          name: ${PROXY_NAME}
+          labels:
+            name: ${PROXY_NAME}
+        spec:
+          containers:
+            - env: []
+              name: apache-example
+              image: " "
+              imagePullPolicy: Always
+              readinessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 5
+                httpGet:
+                  path: "/"
+                  port: 8080
+              livenessProbe:
+                timeoutSeconds: 3
+                initialDelaySeconds: 30
+                httpGet:
+                  path: "/"
+                  port: 8080
+              ports:
+                - containerPort: 8080
+                  name: apache-http
+                  protocol: TCP
+    trigger:
+      - type: ImageChange
+        imageChangeParams:
+          automatic: true
+          containerName:
+            - apache-example
+        from:
+          kind: ImageStreamTag
+          name: "${PROXY_NAME}:latest"
+      - type: ConfigChange
+  - kind: Service
+    apiVersion: v1
+    metadata:
+      name: "${PROXY_NAME}"
+      annotations:
+        description: Exposes the web server
+    spec:
+      ports:
+        - name: web
+          port: 8080
+          targetPort: 8080
+      selector:
+        name: "${PROXY_NAME}"
+  - kind: Route
+    apiVersion: v1
+    metadata:
+      name: ${PROXY_NAME}
+    spec:
+      host: ${APPLICATION_DOMAIN}
+      to:
+        kind: Service
+        name: ${PROXY_NAME}
+
+parameters:
+  - name: PROXY_NAME
+    description: Applicationname (Proxy)
+    value: apache-proxy
+    required: true
+  - name: APPLICATION_DOMAIN
+    description: Hostname to Application Service
+    displayName: Hostname
+    value: ''
+  - name: APACHE_VERSION
+    description: Apache Version
+    displayName: Apache Version
+    required: true
+    value: 'latest'
+  - name: SOURCE_REPOSITORY_URL
+    displayName: Git Repository URL
+    description: The URL of the repository with your application source code.
+    required: true
+    value: https://github.com/Madomur/openshift-apache-test.git
+  - name: SOURCE_REPOSITORY_REF
+    displayName: Git Reference
+    description: Set this to a branch name, tag or other ref of your repository if you
+      are not using the default branch.
+  - name: CONTEXT_DIR
+    displayName: Context Directory
+    description: Set this to the relative path to your project if it is not in the root
+      of your repository.
+  - name: GITHUB_WEBHOOK_SECRET
+    displayName: GitHub Webhook Secret
+    description: Github trigger secret.  A difficult to guess string encoded as part
+      of the webhook URL.  Not encrypted.
+    generate: expression
+    from: "[a-zA-Z0-9]{40}"
